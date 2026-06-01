@@ -40,7 +40,12 @@ struct ContentView: View {
     var body: some View {
         NavigationStack {
             ZStack {
-                Color(red: 0.90, green: 0.84, blue: 0.81)
+                Image("home_picture")
+                    .resizable()
+                    .scaledToFill()
+                    .ignoresSafeArea()
+
+                Color.black.opacity(0.18)
                     .ignoresSafeArea()
 
                 ScrollView {
@@ -48,7 +53,7 @@ struct ContentView: View {
                         HStack(alignment: .center) {
                             Text(museumTitle)
                                 .font(.system(size: 34, weight: .regular, design: .serif))
-                                .foregroundStyle(Color(red: 0.30, green: 0.15, blue: 0.10))
+                                .foregroundStyle(.white)
                                 .lineLimit(1)
                                 .minimumScaleFactor(0.75)
                         }
@@ -73,7 +78,9 @@ struct ContentView: View {
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
-                        isShowingAddExhibitionView = true
+                        withAnimation(.easeInOut(duration: 0.35)) {
+                            isShowingAddExhibitionView = true
+                        }
                     } label: {
                         Image(systemName: "plus")
                             .font(.title3.weight(.semibold))
@@ -82,17 +89,34 @@ struct ContentView: View {
                     .accessibilityLabel("展示を追加")
                 }
             }
-            .navigationDestination(isPresented: $isShowingAddExhibitionView) {
-                AddExhibitionView { title, comment, photoCount, coverImage, photos, backgroundImageName in
-                    saveTicket(
-                        title: title,
-                        comment: comment,
-                        photoCount: photoCount,
-                        coverImage: coverImage,
-                        photos: photos,
-                        backgroundImageName: backgroundImageName
-                    )
-                    isShowingAddExhibitionView = false
+            .overlay {
+                if isShowingAddExhibitionView {
+                    NavigationStack {
+                        AddExhibitionView { title, comment, photoCount, coverImage, photos, backgroundImageName in
+                            saveTicket(
+                                title: title,
+                                comment: comment,
+                                photoCount: photoCount,
+                                coverImage: coverImage,
+                                photos: photos,
+                                backgroundImageName: backgroundImageName
+                            )
+                            withAnimation(.easeInOut(duration: 0.35)) {
+                                isShowingAddExhibitionView = false
+                            }
+                        }
+                        .toolbar {
+                            ToolbarItem(placement: .topBarLeading) {
+                                Button("閉じる") {
+                                    withAnimation(.easeInOut(duration: 0.35)) {
+                                        isShowingAddExhibitionView = false
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    .transition(.opacity)
+                    .zIndex(2)
                 }
             }
             .navigationDestination(isPresented: $isShowingTicketPreview) {
@@ -246,19 +270,37 @@ struct ExhibitionPreviewView: View {
 /// 写真展のチケット見た目を表示します。
 struct TicketView: View {
     let ticket: ExhibitionTicket
+    private let ticketPaperColor = Color(red: 0.95, green: 0.94, blue: 0.90)
+    private let ticketInkColor = Color(red: 0.27, green: 0.25, blue: 0.21)
 
     var body: some View {
-        HStack(spacing: 0) {
-            TicketMainArea(ticket: ticket)
+        GeometryReader { proxy in
+            let splitX = proxy.size.width * 0.68
 
-            TicketStubArea()
+            HStack(spacing: 0) {
+                TicketMainArea(ticket: ticket, ticketInkColor: ticketInkColor, ticketPaperColor: ticketPaperColor)
+                    .frame(width: splitX)
+                TicketStubArea(ticketInkColor: ticketInkColor, ticketPaperColor: ticketPaperColor)
+            }
+            .frame(width: proxy.size.width, height: proxy.size.height)
+            .background(ticketPaperColor)
+            .overlay {
+                TicketPaperTexture()
+                    .clipShape(TicketShape(cornerRadius: 10, sideNotchRadius: 16))
+                    .allowsHitTesting(false)
+            }
+            .clipShape(TicketShape(cornerRadius: 10, sideNotchRadius: 16))
+            .overlay(
+                TicketShape(cornerRadius: 10, sideNotchRadius: 16)
+                    .stroke(ticketInkColor.opacity(0.14), lineWidth: 1)
+            )
+            .overlay {
+                TicketPerforationCutout(xPosition: splitX)
+                    .blendMode(.destinationOut)
+            }
+            .compositingGroup()
         }
-        .frame(height: 190)
-        .background(.white)
-        .clipShape(RoundedRectangle(cornerRadius: 0, style: .continuous))
-        .overlay {
-            TicketPerforationEdge()
-        }
+        .frame(height: 130)
         .shadow(color: .black.opacity(0.08), radius: 8, y: 4)
     }
 }
@@ -266,131 +308,204 @@ struct TicketView: View {
 /// チケットの左側メイン情報を表示します。
 struct TicketMainArea: View {
     let ticket: ExhibitionTicket
+    let ticketInkColor: Color
+    let ticketPaperColor: Color
 
     var body: some View {
-        ZStack(alignment: .bottomLeading) {
-            if let coverImage = ticket.coverImage {
-                Image(uiImage: coverImage)
+        HStack(spacing: 10) {
+            TicketThumbnailView(ticket: ticket)
+                .padding(.leading, 6)
+
+            VStack(alignment: .leading, spacing: 5) {
+                Text(ticket.title)
+                    .font(.title2.weight(.bold))
+                    .foregroundStyle(ticketInkColor)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
+
+                Text("\(publishedDateText(ticket.publishedAt))-")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(ticketInkColor.opacity(0.8))
+
+                Text("全\(ticket.photoCount)作品")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(ticketInkColor.opacity(0.9))
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 10)
+        .background(ticketPaperColor)
+    }
+
+    private func publishedDateText(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "ja_JP")
+        formatter.dateFormat = "yyyy.MM.dd"
+        return formatter.string(from: date)
+    }
+}
+
+/// チケット内の正方形サムネイルを表示します。
+struct TicketThumbnailView: View {
+    let ticket: ExhibitionTicket
+
+    var body: some View {
+        let image = ticket.photos.first?.image ?? ticket.coverImage
+
+        Group {
+            if let image {
+                Image(uiImage: image)
                     .resizable()
                     .scaledToFill()
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .clipped()
             } else {
                 Rectangle()
-                    .fill(Color.gray.opacity(0.35))
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .fill(Color.gray.opacity(0.28))
+                    .overlay {
+                        Image(systemName: "photo")
+                            .foregroundStyle(.gray)
+                    }
             }
-
-            LinearGradient(
-                colors: [Color.black.opacity(0.72), Color.black.opacity(0.25), Color.clear],
-                startPoint: .bottom,
-                endPoint: .top
-            )
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-
-            VStack(alignment: .leading, spacing: 4) {
-                Text(ticket.title)
-                    .font(.system(size: 37, weight: .black))
-                    .foregroundStyle(.white)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.6)
-
-                Text("\(ticket.photoCount)枚の写真")
-                    .font(.system(size: 20, weight: .medium))
-                    .foregroundStyle(.white)
-
-                if !ticket.comment.isEmpty {
-                    Text(ticket.comment)
-                        .font(.footnote)
-                        .foregroundStyle(.white.opacity(0.9))
-                        .lineLimit(2)
-                }
-            }
-            .padding(16)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
-        .padding(.leading, 10)
-        .padding(.vertical, 10)
-        .padding(.trailing, 10)
-        .background(.white)
+        .frame(width: 96, height: 96)
+        .clipped()
     }
 }
 
 /// チケットの右側スタブを表示します。
 struct TicketStubArea: View {
-    var body: some View {
-        ZStack {
-            Color.white
+    let ticketInkColor: Color
+    let ticketPaperColor: Color
 
-            Rectangle()
-                .fill(Color.black.opacity(0.2))
-                .frame(width: 2)
-                .overlay(
-                    VStack(spacing: 5) {
-                        ForEach(0..<18, id: \.self) { _ in
-                            Rectangle()
-                                .fill(.black.opacity(0.4))
-                                .frame(width: 2, height: 4)
-                        }
-                    }
-                )
+    var body: some View {
+        VStack {
+            Spacer()
+            Text("入場する")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(ticketInkColor.opacity(0.85))
+            Spacer()
         }
-        .frame(width: 68)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(ticketPaperColor)
     }
 }
 
-/// チケット左右の切り込みと中央ミシン線を描画します。
-struct TicketPerforationEdge: View {
+/// 右側半円ノッチ付きの再利用可能なチケット形状です。
+struct TicketShape: Shape {
+    var cornerRadius: CGFloat = 10
+    var sideNotchRadius: CGFloat = 16
+
+    func path(in rect: CGRect) -> Path {
+        let r = min(cornerRadius, min(rect.width, rect.height) * 0.2)
+        let notchR = min(sideNotchRadius, rect.height * 0.4)
+        let left = rect.minX
+        let right = rect.maxX
+        let top = rect.minY
+        let bottom = rect.maxY
+
+        var path = Path()
+        path.move(to: CGPoint(x: left + r, y: top))
+        path.addLine(to: CGPoint(x: right - r, y: top))
+        path.addArc(
+            center: CGPoint(x: right - r, y: top + r),
+            radius: r,
+            startAngle: .degrees(-90),
+            endAngle: .degrees(0),
+            clockwise: false
+        )
+        path.addLine(to: CGPoint(x: right, y: rect.midY - notchR))
+        path.addArc(
+            center: CGPoint(x: right, y: rect.midY),
+            radius: notchR,
+            startAngle: .degrees(-90),
+            endAngle: .degrees(90),
+            clockwise: true
+        )
+        path.addLine(to: CGPoint(x: right, y: bottom - r))
+        path.addArc(
+            center: CGPoint(x: right - r, y: bottom - r),
+            radius: r,
+            startAngle: .degrees(0),
+            endAngle: .degrees(90),
+            clockwise: false
+        )
+        path.addLine(to: CGPoint(x: left + r, y: bottom))
+
+        path.addArc(
+            center: CGPoint(x: left + r, y: bottom - r),
+            radius: r,
+            startAngle: .degrees(90),
+            endAngle: .degrees(180),
+            clockwise: false
+        )
+        path.addLine(to: CGPoint(x: left, y: top + r))
+        path.addArc(
+            center: CGPoint(x: left + r, y: top + r),
+            radius: r,
+            startAngle: .degrees(180),
+            endAngle: .degrees(270),
+            clockwise: false
+        )
+        path.closeSubpath()
+        return path
+    }
+}
+
+/// チケット中央の上下半円と点線をくり抜くための描画Viewです。
+struct TicketPerforationCutout: View {
+    let xPosition: CGFloat
+    
     var body: some View {
         GeometryReader { proxy in
             let h = proxy.size.height
-
+            
             ZStack {
-                HStack {
-                    Circle()
-                        .fill(Color(red: 0.90, green: 0.84, blue: 0.81))
-                        .frame(width: 18, height: 18)
-                        .offset(x: -9)
-                    Spacer()
-                    Circle()
-                        .fill(Color(red: 0.90, green: 0.84, blue: 0.81))
-                        .frame(width: 18, height: 18)
-                        .offset(x: 9)
+                Circle()
+                    .fill(.black)
+                    .frame(width: 10, height: 10)
+                    .position(x: xPosition, y: 0)
+                
+                Circle()
+                    .fill(.black)
+                    .frame(width: 10, height: 10)
+                    .position(x: xPosition, y: h)
+                
+                VStack(spacing: 4) {
+                    ForEach(0..<14, id: \.self) { _ in
+                        Rectangle()
+                            .fill(.black)
+                            .frame(width: 2, height: 4)
+                    }
                 }
-                .position(x: proxy.size.width / 2, y: h * 0.25)
-
-                HStack {
-                    Circle()
-                        .fill(Color(red: 0.90, green: 0.84, blue: 0.81))
-                        .frame(width: 18, height: 18)
-                        .offset(x: -9)
-                    Spacer()
-                    Circle()
-                        .fill(Color(red: 0.90, green: 0.84, blue: 0.81))
-                        .frame(width: 18, height: 18)
-                        .offset(x: 9)
-                }
-                .position(x: proxy.size.width / 2, y: h * 0.50)
-
-                HStack {
-                    Circle()
-                        .fill(Color(red: 0.90, green: 0.84, blue: 0.81))
-                        .frame(width: 18, height: 18)
-                        .offset(x: -9)
-                    Spacer()
-                    Circle()
-                        .fill(Color(red: 0.90, green: 0.84, blue: 0.81))
-                        .frame(width: 18, height: 18)
-                        .offset(x: 9)
-                }
-                .position(x: proxy.size.width / 2, y: h * 0.75)
-
-                Rectangle()
-                    .fill(Color.black.opacity(0.2))
-                    .frame(width: 2, height: h - 20)
-                    .position(x: proxy.size.width - 68, y: h / 2)
+                .position(x: xPosition, y: h / 2)
             }
         }
+    }
+}
+
+/// チケットに薄い紙の質感を重ねるためのビューです。
+struct TicketPaperTexture: View {
+    var body: some View {
+        Canvas { context, size in
+            for i in 0..<360 {
+                let x = pseudoRandom(i * 17 + 3) * size.width
+                let y = pseudoRandom(i * 31 + 11) * size.height
+                let w = 0.8 + pseudoRandom(i * 13 + 7) * 1.8
+                let h = 0.8 + pseudoRandom(i * 19 + 5) * 1.8
+                let alpha = 0.025 + pseudoRandom(i * 23 + 2) * 0.055
+                context.fill(
+                    Path(ellipseIn: CGRect(x: x, y: y, width: w, height: h)),
+                    with: .color(.black.opacity(alpha))
+                )
+            }
+        }
+        .blendMode(.multiply)
+        .opacity(0.82)
+    }
+    
+    private func pseudoRandom(_ seed: Int) -> CGFloat {
+        let x = sin(Double(seed) * 12.9898 + 78.233) * 43758.5453
+        return CGFloat(x - floor(x))
     }
 }
 

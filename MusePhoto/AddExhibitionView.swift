@@ -77,8 +77,9 @@ struct AddExhibitionView: View {
 
             Spacer(minLength: 0)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding()
-        .background(Color(red: 0.95, green: 0.89, blue: 0.86).ignoresSafeArea())
+        .background(Color.white.opacity(0.46).ignoresSafeArea())
         .navigationTitle("展示を追加")
         .navigationBarTitleDisplayMode(.inline)
         .onChange(of: selectedItems) {
