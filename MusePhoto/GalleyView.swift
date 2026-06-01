@@ -9,13 +9,14 @@ import SwiftUI
 
 /// 展示写真を手動スライドで鑑賞する画面です。
 struct GalleyView: View {
-    @Environment(\.dismiss) private var dismiss
     let ticket: ExhibitionTicket
+    let onExitToHome: () -> Void
 
     @State private var currentIndex = 0
     @State private var blackoutOpacity = 0.0
     @State private var isTransitioning = false
     @State private var isShowingEnding = false
+    @State private var isShowingPhotoInfo = false
 
     var body: some View {
         ZStack {
@@ -33,13 +34,14 @@ struct GalleyView: View {
                 if isShowingEnding {
                     endingView
                 } else if ticket.photos.indices.contains(currentIndex) {
-                    FramedSlidePhotoView(photo: ticket.photos[currentIndex])
+                    FramedSlidePhotoView(photo: ticket.photos[currentIndex].image)
                 }
 
-                Text("\(currentIndex + 1) / \(ticket.photos.count)")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.white.opacity(0.9))
-                    .opacity(isShowingEnding ? 0 : 1)
+                ExhibitionProgressIndicator(
+                    totalCount: ticket.photos.count,
+                    currentIndex: currentIndex
+                )
+                .opacity(isShowingEnding ? 0 : 1)
 
                 Spacer(minLength: 70)
             }
@@ -62,9 +64,42 @@ struct GalleyView: View {
                 .opacity(blackoutOpacity)
                 .ignoresSafeArea()
                 .allowsHitTesting(false)
+
+            VStack {
+                Spacer()
+                HStack {
+                    Spacer()
+                    Button {
+                        isShowingPhotoInfo = true
+                    } label: {
+                        Image(systemName: "info.circle")
+                            .font(.title3.weight(.semibold))
+                            .foregroundStyle(.white)
+                            .frame(width: 60, height: 60)
+                            .background(Color.white.opacity(0.12))
+                            .clipShape(Circle())
+                            .overlay(
+                                Circle()
+                                    .stroke(Color.white.opacity(0.55), lineWidth: 1.2)
+                            )
+                            .shadow(color: .white.opacity(0.25), radius: 8)
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.trailing, 30)
+                    .padding(.bottom, 44)
+                    .opacity(isShowingEnding ? 0 : 1)
+                }
+            }
         }
         .navigationTitle(ticket.title)
         .navigationBarTitleDisplayMode(.inline)
+        .sheet(isPresented: $isShowingPhotoInfo) {
+            if ticket.photos.indices.contains(currentIndex) {
+                PhotoInfoSheetView(photo: ticket.photos[currentIndex])
+                    .presentationDetents([.medium, .large])
+                    .presentationDragIndicator(.visible)
+            }
+        }
     }
 
     /// 右方向スワイプで前の写真へ移動します。
@@ -155,7 +190,7 @@ struct GalleyView: View {
             .buttonStyle(.plain)
 
             Button {
-                dismiss()
+                onExitToHome()
             } label: {
                 Text("次の展示を探す")
                     .font(.headline.weight(.semibold))
@@ -172,6 +207,95 @@ struct GalleyView: View {
             .buttonStyle(.plain)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
+/// 展示の進行状況を、●─○のような館内導線で表示します。
+struct ExhibitionProgressIndicator: View {
+    let totalCount: Int
+    let currentIndex: Int
+
+    var body: some View {
+        HStack(spacing: 0) {
+            ForEach(0..<max(totalCount, 0), id: \.self) { index in
+                let isCurrent = index == currentIndex
+
+                Circle()
+                    .fill(isCurrent ? Color.white : Color.clear)
+                    .frame(width: 10, height: 10)
+                    .overlay(
+                        Circle()
+                            .stroke(Color.white.opacity(isCurrent ? 0.95 : 0.65), lineWidth: 1)
+                    )
+                    .shadow(color: isCurrent ? .white.opacity(0.9) : .clear, radius: 8)
+
+                if index < totalCount - 1 {
+                    Rectangle()
+                        .fill(Color.white.opacity(0.45))
+                        .frame(width: 28, height: 1)
+                        .padding(.horizontal, 3)
+                }
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 8)
+        .background(Color.black.opacity(0.22))
+        .clipShape(Capsule())
+    }
+}
+
+/// 写真の情報シートを表示します。
+struct PhotoInfoSheetView: View {
+    let photo: ExhibitionPhoto
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Capsule()
+                .fill(Color.black.opacity(0.35))
+                .frame(width: 36, height: 4)
+                .frame(maxWidth: .infinity, alignment: .center)
+                .padding(.bottom, 4)
+
+            Text(photo.title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "タイトル未設定" : photo.title)
+                .font(.title2.weight(.bold))
+
+            Divider()
+
+            InfoRow(label: "カメラ", value: displayValue(photo.cameraInfo.cameraModel))
+            InfoRow(label: "レンズ", value: displayValue(photo.cameraInfo.lensModel))
+            InfoRow(label: "絞り", value: displayValue(photo.cameraInfo.aperture))
+            InfoRow(label: "シャッタースピード", value: displayValue(photo.cameraInfo.shutterSpeed))
+            InfoRow(label: "ISO", value: displayValue(photo.cameraInfo.iso))
+            InfoRow(label: "撮影日時", value: displayValue(photo.cameraInfo.shotDate))
+
+            Spacer()
+        }
+        .padding(20)
+        .background(Color.white)
+    }
+
+    private func displayValue(_ value: String) -> String {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? "未設定" : trimmed
+    }
+}
+
+/// 情報シートの1行です。
+struct InfoRow: View {
+    let label: String
+    let value: String
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Text(label)
+                .font(.body.weight(.semibold))
+                .foregroundStyle(.black.opacity(0.75))
+                .frame(width: 120, alignment: .leading)
+            Text(value)
+                .font(.body)
+                .foregroundStyle(.black)
+            Spacer()
+        }
     }
 }
 
@@ -217,7 +341,8 @@ struct FramedSlidePhotoView: View {
                 photos: [],
                 backgroundImageName: "gallery_background_white",
                 publishedAt: Date()
-            )
+            ),
+            onExitToHome: {}
         )
     }
 }

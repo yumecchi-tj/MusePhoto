@@ -8,6 +8,13 @@
 import SwiftUI
 import Observation
 
+/// 展示に含まれる1枚分の写真情報です。
+struct ExhibitionPhoto {
+    let image: UIImage
+    let title: String
+    let cameraInfo: CameraInfo
+}
+
 /// ホーム画面で表示する写真展チケットのデータです。
 struct ExhibitionTicket: Identifiable {
     let id = UUID()
@@ -15,7 +22,7 @@ struct ExhibitionTicket: Identifiable {
     let comment: String
     let photoCount: Int
     let coverImage: UIImage?
-    let photos: [UIImage]
+    let photos: [ExhibitionPhoto]
     let backgroundImageName: String
     let publishedAt: Date
 }
@@ -32,7 +39,7 @@ final class HomeViewModel {
         comment: String,
         photoCount: Int,
         coverImage: UIImage?,
-        photos: [UIImage],
+        photos: [ExhibitionPhoto],
         backgroundImageName: String
     ) {
         let safeTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -73,21 +80,6 @@ struct ContentView: View {
                                 .foregroundStyle(Color(red: 0.30, green: 0.15, blue: 0.10))
                                 .lineLimit(1)
                                 .minimumScaleFactor(0.75)
-
-                            Spacer()
-
-                            Button {
-                                isShowingAddExhibitionView = true
-                            } label: {
-                                Image(systemName: "plus")
-                                    .font(.system(size: 28, weight: .regular))
-                                    .foregroundStyle(.black)
-                                    .frame(width: 76, height: 76)
-                                    .background(.white.opacity(0.85))
-                                    .clipShape(Circle())
-                            }
-                            .buttonStyle(.plain)
-                            .accessibilityLabel("展示を追加")
                         }
 
                         VStack(spacing: 18) {
@@ -107,7 +99,18 @@ struct ContentView: View {
                     .padding(.bottom, 28)
                 }
             }
-            .navigationBarHidden(true)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button {
+                        isShowingAddExhibitionView = true
+                    } label: {
+                        Image(systemName: "plus")
+                            .font(.title3.weight(.semibold))
+                    }
+                    .tint(.black)
+                    .accessibilityLabel("展示を追加")
+                }
+            }
             .navigationDestination(isPresented: $isShowingAddExhibitionView) {
                 AddExhibitionView { title, comment, photoCount, coverImage, photos, backgroundImageName in
                     viewModel.addTicket(
@@ -123,7 +126,10 @@ struct ContentView: View {
             }
             .navigationDestination(isPresented: $isShowingTicketPreview) {
                 if let ticket = selectedTicket {
-                    ExhibitionPreviewView(ticket: ticket)
+                    ExhibitionPreviewView(ticket: ticket) {
+                        isShowingTicketPreview = false
+                        selectedTicket = nil
+                    }
                 } else {
                     EmptyView()
                 }
@@ -134,8 +140,8 @@ struct ContentView: View {
 
 /// チケットタップ後に表示する展示プレビュー画面です。
 struct ExhibitionPreviewView: View {
-    @Environment(\.dismiss) private var dismiss
     let ticket: ExhibitionTicket
+    let onExitToHome: () -> Void
 
     var body: some View {
         ZStack {
@@ -152,22 +158,6 @@ struct ExhibitionPreviewView: View {
             .ignoresSafeArea()
 
             VStack {
-                HStack {
-                    Button {
-                        dismiss()
-                    } label: {
-                        Image(systemName: "chevron.left")
-                            .font(.title3.weight(.semibold))
-                            .foregroundStyle(.white)
-                    }
-                    Spacer()
-                    Image(systemName: "ellipsis")
-                        .font(.title3.weight(.semibold))
-                        .foregroundStyle(.white)
-                }
-                .padding(.horizontal, 22)
-                .padding(.top, 18)
-
                 Spacer()
 
                 VStack(alignment: .leading, spacing: 10) {
@@ -191,7 +181,7 @@ struct ExhibitionPreviewView: View {
                     }
 
                     NavigationLink {
-                        GalleyView(ticket: ticket)
+                        GalleyView(ticket: ticket, onExitToHome: onExitToHome)
                     } label: {
                         Text("展示を見る")
                             .font(.title3.weight(.semibold))
@@ -212,7 +202,13 @@ struct ExhibitionPreviewView: View {
                 .padding(.bottom, 34)
             }
         }
-        .navigationBarBackButtonHidden(true)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Image(systemName: "ellipsis")
+                    .font(.headline.weight(.semibold))
+                    .foregroundStyle(.white.opacity(0.9))
+            }
+        }
     }
 
     /// 公開日を表示用の文字列に変換します。

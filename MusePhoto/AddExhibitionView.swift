@@ -41,7 +41,7 @@ struct AddExhibitionView: View {
     @State private var photoDrafts: [PhotoDraft] = []
     @State private var showEditor = false
 
-    let onSave: (String, String, Int, UIImage?, [UIImage], String) -> Void
+    let onSave: (String, String, Int, UIImage?, [ExhibitionPhoto], String) -> Void
 
     var body: some View {
         VStack(spacing: 24) {
@@ -89,7 +89,13 @@ struct AddExhibitionView: View {
         .navigationDestination(isPresented: $showEditor) {
             PhotoCardsEditorView(photoDrafts: $photoDrafts) { exhibitionTitle, exhibitionComment, backgroundImageName in
                 let coverImage = photoDrafts.first?.uiImage
-                let photos = photoDrafts.map { $0.uiImage }
+                let photos = photoDrafts.map {
+                    ExhibitionPhoto(
+                        image: $0.uiImage,
+                        title: $0.title,
+                        cameraInfo: $0.cameraInfo
+                    )
+                }
                 onSave(exhibitionTitle, exhibitionComment, photoDrafts.count, coverImage, photos, backgroundImageName)
             }
         }
