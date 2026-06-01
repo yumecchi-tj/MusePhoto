@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import SwiftData
 
 @main
 struct MusePhotoApp: App {
@@ -13,5 +14,6 @@ struct MusePhotoApp: App {
         WindowGroup {
             ContentView()
         }
+        .modelContainer(for: [ExhibitionRecord.self])
     }
 }

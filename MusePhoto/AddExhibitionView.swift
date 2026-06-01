@@ -10,7 +10,7 @@ import PhotosUI
 import ImageIO
 
 /// 写真のカメラ情報です。
-struct CameraInfo {
+struct CameraInfo: Codable {
     var cameraModel = ""
     var lensModel = ""
     var aperture = ""

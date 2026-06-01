@@ -6,7 +6,7 @@
 //
 
 import SwiftUI
-import Observation
+import SwiftData
 
 /// 展示に含まれる1枚分の写真情報です。
 struct ExhibitionPhoto {
@@ -27,44 +27,15 @@ struct ExhibitionTicket: Identifiable {
     let publishedAt: Date
 }
 
-/// ホーム画面で使う表示データを管理します。
-@Observable
-final class HomeViewModel {
-    var museumTitle = "My Museum"
-    var tickets: [ExhibitionTicket] = []
-
-    /// 新しい写真展チケットを先頭に追加します。
-    func addTicket(
-        title: String,
-        comment: String,
-        photoCount: Int,
-        coverImage: UIImage?,
-        photos: [ExhibitionPhoto],
-        backgroundImageName: String
-    ) {
-        let safeTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !safeTitle.isEmpty else { return }
-        guard photoCount > 0 else { return }
-
-        let safeComment = comment.trimmingCharacters(in: .whitespacesAndNewlines)
-        let ticket = ExhibitionTicket(
-            title: safeTitle,
-            comment: safeComment,
-            photoCount: photoCount,
-            coverImage: coverImage,
-            photos: photos,
-            backgroundImageName: backgroundImageName,
-            publishedAt: Date()
-        )
-        tickets.insert(ticket, at: 0)
-    }
-}
-
 struct ContentView: View {
-    @State private var viewModel = HomeViewModel()
+    @Environment(\.modelContext) private var modelContext
+    @Query(sort: \ExhibitionRecord.publishedAt, order: .reverse) private var records: [ExhibitionRecord]
+
     @State private var isShowingAddExhibitionView = false
     @State private var selectedTicket: ExhibitionTicket?
     @State private var isShowingTicketPreview = false
+
+    private let museumTitle = "My Museum"
 
     var body: some View {
         NavigationStack {
@@ -75,7 +46,7 @@ struct ContentView: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 22) {
                         HStack(alignment: .center) {
-                            Text(viewModel.museumTitle)
+                            Text(museumTitle)
                                 .font(.system(size: 34, weight: .regular, design: .serif))
                                 .foregroundStyle(Color(red: 0.30, green: 0.15, blue: 0.10))
                                 .lineLimit(1)
@@ -83,7 +54,7 @@ struct ContentView: View {
                         }
 
                         VStack(spacing: 18) {
-                            ForEach(viewModel.tickets) { ticket in
+                            ForEach(ticketsFromRecords()) { ticket in
                                 Button {
                                     selectedTicket = ticket
                                     isShowingTicketPreview = true
@@ -113,7 +84,7 @@ struct ContentView: View {
             }
             .navigationDestination(isPresented: $isShowingAddExhibitionView) {
                 AddExhibitionView { title, comment, photoCount, coverImage, photos, backgroundImageName in
-                    viewModel.addTicket(
+                    saveTicket(
                         title: title,
                         comment: comment,
                         photoCount: photoCount,
@@ -134,6 +105,58 @@ struct ContentView: View {
                     EmptyView()
                 }
             }
+        }
+    }
+
+    /// SwiftDataに展示情報を保存します。
+    private func saveTicket(
+        title: String,
+        comment: String,
+        photoCount: Int,
+        coverImage: UIImage?,
+        photos: [ExhibitionPhoto],
+        backgroundImageName: String
+    ) {
+        let storedPhotos = photos.compactMap { photo -> StoredPhoto? in
+            guard let imageData = photo.image.jpegData(compressionQuality: 0.95) else { return nil }
+            return StoredPhoto(imageData: imageData, title: photo.title, cameraInfo: photo.cameraInfo)
+        }
+
+        let encoder = JSONEncoder()
+        guard let photosData = try? encoder.encode(storedPhotos) else { return }
+
+        let record = ExhibitionRecord(
+            title: title,
+            comment: comment,
+            photoCount: photoCount,
+            backgroundImageName: backgroundImageName,
+            publishedAt: Date(),
+            coverImageData: coverImage?.jpegData(compressionQuality: 0.95),
+            photosData: photosData
+        )
+        modelContext.insert(record)
+    }
+
+    /// SwiftData保存データを画面表示用データへ変換します。
+    private func ticketsFromRecords() -> [ExhibitionTicket] {
+        let decoder = JSONDecoder()
+
+        return records.map { record in
+            let storedPhotos = (try? decoder.decode([StoredPhoto].self, from: record.photosData)) ?? []
+            let photos = storedPhotos.compactMap { stored -> ExhibitionPhoto? in
+                guard let uiImage = UIImage(data: stored.imageData) else { return nil }
+                return ExhibitionPhoto(image: uiImage, title: stored.title, cameraInfo: stored.cameraInfo)
+            }
+
+            return ExhibitionTicket(
+                title: record.title,
+                comment: record.comment,
+                photoCount: record.photoCount,
+                coverImage: record.coverImageData.flatMap { UIImage(data: $0) },
+                photos: photos,
+                backgroundImageName: record.backgroundImageName,
+                publishedAt: record.publishedAt
+            )
         }
     }
 }
@@ -165,9 +188,9 @@ struct ExhibitionPreviewView: View {
                         .font(.system(size: 45, weight: .bold))
                         .foregroundStyle(.white)
 
-                Text("\(ticket.photoCount)枚の写真")
-                    .font(.title3.weight(.semibold))
-                    .foregroundStyle(.white.opacity(0.92))
+                    Text("\(ticket.photoCount)枚の写真")
+                        .font(.title3.weight(.semibold))
+                        .foregroundStyle(.white.opacity(0.92))
 
                     Text("公開中   \(publishedDateText(ticket.publishedAt)) -")
                         .font(.headline.weight(.semibold))
@@ -199,7 +222,7 @@ struct ExhibitionPreviewView: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, 28)
-                .padding(.bottom, 34)
+                .padding(.bottom, 54)
             }
         }
         .toolbar {
@@ -373,4 +396,5 @@ struct TicketPerforationEdge: View {
 
 #Preview {
     ContentView()
+        .modelContainer(for: [ExhibitionRecord.self], inMemory: true)
 }
