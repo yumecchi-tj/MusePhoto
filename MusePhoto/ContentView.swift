@@ -33,7 +33,15 @@ struct ContentView: View {
 
     @State private var isShowingAddExhibitionView = false
     @State private var selectedTicket: ExhibitionTicket?
-    @State private var isShowingTicketPreview = false
+    @State private var showTicketOverlay = false
+    @State private var animationPhase = 0
+    @State private var seamShift: CGFloat = 0
+    @State private var ticketVisible = true
+    @State private var showEntranceOverlay = false
+    @State private var entrancePhase = 0
+    @State private var entranceRevealProgress: CGFloat = 0
+    @State private var shouldStartDetailWhiteReveal = false
+    @State private var showExhibitionDetail = false
 
     private let museumTitle = "My Museum"
 
@@ -62,7 +70,10 @@ struct ContentView: View {
                             ForEach(ticketsFromRecords()) { ticket in
                                 Button {
                                     selectedTicket = ticket
-                                    isShowingTicketPreview = true
+                                    ticketVisible = true
+                                    withAnimation(.spring(response: 0.36, dampingFraction: 0.9)) {
+                                        showTicketOverlay = true
+                                    }
                                 } label: {
                                     TicketView(ticket: ticket)
                                 }
@@ -74,6 +85,8 @@ struct ContentView: View {
                     .padding(.top, 26)
                     .padding(.bottom, 28)
                 }
+                .blur(radius: showTicketOverlay ? 7 : 0)
+                .animation(.easeInOut(duration: 0.25), value: showTicketOverlay)
             }
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
@@ -119,16 +132,167 @@ struct ContentView: View {
                     .zIndex(2)
                 }
             }
-            .navigationDestination(isPresented: $isShowingTicketPreview) {
-                if let ticket = selectedTicket {
-                    ExhibitionPreviewView(ticket: ticket) {
-                        isShowingTicketPreview = false
-                        selectedTicket = nil
-                    }
-                } else {
-                    EmptyView()
+            .overlay {
+                if showTicketOverlay, let selectedTicket {
+                    TicketUseOverlay(
+                        ticket: selectedTicket,
+                        animationPhase: $animationPhase,
+                        seamShift: seamShift,
+                        ticketVisible: ticketVisible,
+                        onCancel: {
+                            withAnimation(.easeInOut(duration: 0.25)) {
+                                showTicketOverlay = false
+                            }
+                            animationPhase = 0
+                            seamShift = 0
+                            ticketVisible = true
+                        },
+                        onUse: {
+                            playTicketCutAnimation()
+                        }
+                    )
+                    .transition(.opacity)
+                    .zIndex(3)
                 }
             }
+            .overlay {
+                if showExhibitionDetail, let activeTicket = selectedTicket {
+                    ExhibitionPreviewView(ticket: activeTicket, startWithWhiteReveal: shouldStartDetailWhiteReveal) {
+                        showExhibitionDetail = false
+                        selectedTicket = nil
+                    }
+                    .zIndex(3)
+                    .transition(.identity)
+                }
+            }
+            .overlay {
+                if showEntranceOverlay, let activeTicket = selectedTicket {
+                    ExhibitionEntranceOverlay(
+                        ticket: activeTicket,
+                        phase: entrancePhase,
+                        revealProgress: entranceRevealProgress
+                    )
+                    .zIndex(4)
+                    .allowsHitTesting(true)
+                }
+            }
+        }
+    }
+
+    /// チケットを破る演出を順番に再生し、完了したら展示説明へ進みます。
+    private func playTicketCutAnimation() {
+        // phase 1: 全体が少し下に沈み込む
+        withAnimation(.spring(response: 0.26, dampingFraction: 0.82, blendDuration: 0.08)) {
+            animationPhase = 1
+        }
+        
+        // phase 2: ミシン目へ力を集める「溜め」
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.18) {
+            withAnimation(.easeInOut(duration: 0.2)) {
+                animationPhase = 2
+            }
+            withAnimation(.easeInOut(duration: 0.09)) {
+                seamShift = -4
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.09) {
+                withAnimation(.easeInOut(duration: 0.09)) {
+                    seamShift = 4
+                }
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.18) {
+                withAnimation(.easeInOut(duration: 0.06)) {
+                    seamShift = 0
+                }
+            }
+        }
+        
+        // phase 3: 破れ始め（まだ小さく開く）
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.43) {
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.84, blendDuration: 0.12)) {
+                animationPhase = 3
+            }
+        }
+        
+        // phase 4: 弧を描きながら左右へ開く
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.66) {
+            withAnimation(.spring(response: 0.5, dampingFraction: 0.8, blendDuration: 0.15)) {
+                animationPhase = 4
+            }
+        }
+        
+        // phase 5: フェードアウト
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.03) {
+            withAnimation(.easeOut(duration: 0.3)) {
+                animationPhase = 5
+            }
+        }
+        
+        // 破れ演出が終わったらチケット本体を完全に消す
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
+            ticketVisible = false
+        }
+
+        // アニメーション完了後に展示説明画面へ遷移
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.34) {
+            // 暗転開始時点でチケット関連UIを確実に隠します
+            showTicketOverlay = false
+            seamShift = 0
+            playExhibitionEntranceAnimation()
+        }
+    }
+    
+    /// チケット使用後の「展示室へ入室」演出を再生します。
+    private func playExhibitionEntranceAnimation() {
+        entrancePhase = 0
+        entranceRevealProgress = 0
+        shouldStartDetailWhiteReveal = false
+        showEntranceOverlay = true
+        
+        // phase 1: 暗転（約1秒）
+        withAnimation(.easeInOut(duration: 1.0)) {
+            entrancePhase = 1
+        }
+        
+        // phase 2: タイトルをゆっくり表示（約1秒）
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.05) {
+            withAnimation(.easeInOut(duration: 1.0)) {
+                entrancePhase = 2
+            }
+        }
+        
+        // phase 3: タイトルをしっかり読めるだけ見せた後、中央の白い光を拡張開始（約1.8秒）
+        // 1.05 + 1.0 でタイトル出現完了。その後さらに約2.25秒保持。
+        DispatchQueue.main.asyncAfter(deadline: .now() + 4.3) {
+            withAnimation(.easeInOut(duration: 1.8)) {
+                entrancePhase = 3
+                entranceRevealProgress = 1
+            }
+        }
+        
+        // 白が最大になった瞬間に展示説明画面へ切り替え（白の下で表示を差し替える）
+        DispatchQueue.main.asyncAfter(deadline: .now() + 6.1) {
+            shouldStartDetailWhiteReveal = true
+            showExhibitionDetail = true
+            withAnimation(.linear(duration: 0.12)) {
+                entrancePhase = 4
+            }
+        }
+        
+        // phase 5: 白がゆっくり晴れていく（約1秒）
+        DispatchQueue.main.asyncAfter(deadline: .now() + 6.25) {
+            withAnimation(.easeOut(duration: 1.0)) {
+                entrancePhase = 5
+            }
+        }
+        
+        // 完了後にオーバーレイを閉じる
+        DispatchQueue.main.asyncAfter(deadline: .now() + 7.35) {
+            showEntranceOverlay = false
+            entrancePhase = 0
+            entranceRevealProgress = 0
+            animationPhase = 0
+            ticketVisible = true
+            shouldStartDetailWhiteReveal = false
         }
     }
 
@@ -185,10 +349,335 @@ struct ContentView: View {
     }
 }
 
+/// チケットを使う前の確認モーダル（中央表示）です。
+struct TicketUseOverlay: View {
+    let ticket: ExhibitionTicket
+    @Binding var animationPhase: Int
+    let seamShift: CGFloat
+    let ticketVisible: Bool
+    let onCancel: () -> Void
+    let onUse: () -> Void
+
+    var body: some View {
+        ZStack {
+            Color.black.opacity(0.58)
+                .ignoresSafeArea()
+
+            VStack(spacing: 22) {
+                if ticketVisible {
+                    TicketCutAnimationView(
+                        ticket: ticket,
+                        animationPhase: animationPhase,
+                        seamShift: seamShift
+                    )
+                        .frame(height: 170)
+                        .scaleEffect(overlayScale(phase: animationPhase))
+                        .offset(y: overlayOffsetY(phase: animationPhase))
+                        .opacity(animationPhase == 5 ? 0.0 : 1.0)
+                }
+
+                VStack(spacing: 12) {
+                    Button {
+                        onUse()
+                    } label: {
+                        Text("チケットを使う")
+                            .font(.title3.weight(.semibold))
+                            .frame(maxWidth: .infinity, minHeight: 54)
+                            .foregroundStyle(.white)
+                            .background(Color.black.opacity(0.82))
+                            .clipShape(Capsule())
+                    }
+                    .disabled(animationPhase > 0)
+
+                    Button {
+                        onCancel()
+                    } label: {
+                        Text("キャンセル")
+                            .font(.headline.weight(.semibold))
+                            .frame(maxWidth: .infinity, minHeight: 48)
+                            .foregroundStyle(.white.opacity(0.95))
+                            .background(Color.white.opacity(0.12))
+                            .clipShape(Capsule())
+                    }
+                    .disabled(animationPhase > 0)
+                }
+                .padding(.horizontal, 26)
+                .opacity(ticketVisible ? 1 : 0)
+            }
+            .padding(.horizontal, 20)
+        }
+    }
+    
+    /// フェーズごとの全体スケールです（沈み込みと溜め）。
+    private func overlayScale(phase: Int) -> CGFloat {
+        switch phase {
+        case 1: return 0.975
+        case 2: return 0.985
+        case 5: return 0.95
+        default: return 1.0
+        }
+    }
+    
+    /// フェーズごとの全体Y移動です（最初に沈み込む）。
+    private func overlayOffsetY(phase: Int) -> CGFloat {
+        switch phase {
+        case 1: return 14
+        case 2: return 9
+        case 5: return 18
+        default: return 0
+        }
+    }
+}
+
+/// 展示室へ入室するための暗転・タイトル・光の演出オーバーレイです。
+struct ExhibitionEntranceOverlay: View {
+    let ticket: ExhibitionTicket
+    let phase: Int
+    let revealProgress: CGFloat
+    
+    var body: some View {
+        ZStack {
+            Color.black
+                .opacity(darkOverlayOpacity(phase: phase))
+                .ignoresSafeArea()
+            
+            // 中央の柔らかい光。phase 3 で円形に広がる
+            RadialGradient(
+                colors: [
+                    Color.white.opacity(0.72),
+                    Color.white.opacity(0.24),
+                    Color.clear
+                ],
+                center: .center,
+                startRadius: 0,
+                endRadius: 820 * revealProgress
+            )
+            .blendMode(.screen)
+            .ignoresSafeArea()
+            .opacity(phase >= 3 ? 1 : 0)
+            
+            // 全体を白で包む層。phase4で最大化し、phase5で晴れる
+            Color.white
+                .opacity(whiteWrapOpacity(phase: phase))
+                .ignoresSafeArea()
+            
+            VStack(spacing: 8) {
+                Text("Exhibition \(String(format: "%02d", max(ticket.photoCount, 1)))")
+                    .font(.system(size: 16, weight: .medium, design: .serif))
+                    .foregroundStyle(.white.opacity(0.84))
+                
+                Text(ticket.title)
+                    .font(.system(size: 36, weight: .semibold, design: .serif))
+                    .foregroundStyle(.white)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 24)
+                
+                Text(themeText)
+                    .font(.system(size: 16, weight: .regular, design: .serif))
+                    .foregroundStyle(.white.opacity(0.82))
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 28)
+            }
+            .opacity(phase >= 2 ? 1 : 0)
+            .scaleEffect(phase >= 2 ? 1 : 0.95)
+            .animation(.easeInOut(duration: 1.0), value: phase)
+        }
+    }
+    
+    /// 展示テーマの補助テキストを返します。
+    private var themeText: String {
+        if !ticket.comment.isEmpty {
+            return ticket.comment
+        }
+        return "\(ticket.photoCount)作品の展示"
+    }
+    
+    /// フェーズごとの暗転濃度です。
+    private func darkOverlayOpacity(phase: Int) -> CGFloat {
+        switch phase {
+        case 0: return 0
+        case 1: return 1
+        case 2: return 1
+        case 3: return 0.96
+        case 4: return 0.0
+        case 5: return 0.0
+        default: return 0
+        }
+    }
+    
+    /// 画面全体を白く包む層の不透明度です。
+    private func whiteWrapOpacity(phase: Int) -> CGFloat {
+        switch phase {
+        case 0, 1, 2: return 0
+        case 3: return min(0.92, 0.15 + revealProgress * 0.77)
+        case 4: return 1
+        case 5: return 0
+        default: return 0
+        }
+    }
+}
+
+/// チケットが左右に破れる見た目を作るビューです。
+struct TicketCutAnimationView: View {
+    let ticket: ExhibitionTicket
+    let animationPhase: Int
+    let seamShift: CGFloat
+
+    var body: some View {
+        GeometryReader { proxy in
+            let width = proxy.size.width
+            let splitX = width * 0.68
+            let leftState = leftTransform(phase: animationPhase)
+            let rightState = rightTransform(phase: animationPhase)
+
+            ZStack {
+                // 左側チケット片
+                TicketView(ticket: ticket)
+                    .frame(width: width, height: proxy.size.height)
+                    .mask(alignment: .leading) {
+                        Rectangle().frame(width: splitX)
+                    }
+                    .offset(x: leftState.x, y: leftState.y)
+                    .rotationEffect(.degrees(leftState.zRotation))
+                    .rotation3DEffect(.degrees(leftState.x3D), axis: (x: 1, y: 0, z: 0))
+                    .rotation3DEffect(.degrees(leftState.y3D), axis: (x: 0, y: 1, z: 0))
+                    .scaleEffect(leftState.scale)
+                    .opacity(leftState.opacity)
+
+                // 右側チケット片
+                TicketView(ticket: ticket)
+                    .frame(width: width, height: proxy.size.height)
+                    .mask(alignment: .trailing) {
+                        Rectangle().frame(width: width - splitX)
+                    }
+                    .offset(x: rightState.x, y: rightState.y)
+                    .rotationEffect(.degrees(rightState.zRotation))
+                    .rotation3DEffect(.degrees(rightState.x3D), axis: (x: 1, y: 0, z: 0))
+                    .rotation3DEffect(.degrees(rightState.y3D), axis: (x: 0, y: 1, z: 0))
+                    .scaleEffect(rightState.scale)
+                    .opacity(rightState.opacity)
+
+                // 破れ目に出る紙くずの粒
+                TicketPaperParticleView(isActive: animationPhase >= 2, splitX: splitX + seamShift)
+
+                // 中央のミシン目を少し揺らす表示（phase 1のみ）
+                if animationPhase == 1 {
+                    Rectangle()
+                        .fill(Color.white.opacity(0.65))
+                        .frame(width: 1.5, height: proxy.size.height * 0.76)
+                        .overlay {
+                            Rectangle()
+                                .stroke(style: StrokeStyle(lineWidth: 1.2, dash: [4, 4]))
+                                .foregroundStyle(Color.black.opacity(0.35))
+                        }
+                        .offset(x: seamShift)
+                        .position(x: splitX, y: proxy.size.height * 0.5)
+                }
+                if animationPhase == 2 {
+                    Rectangle()
+                        .fill(Color.white.opacity(0.68))
+                        .frame(width: 2, height: proxy.size.height * 0.78)
+                        .offset(x: seamShift)
+                        .position(x: splitX, y: proxy.size.height * 0.5)
+                        .blur(radius: 0.25)
+                }
+            }
+        }
+    }
+
+    /// フェーズごとの左片の動きです。
+    private func leftTransform(phase: Int) -> TicketPieceTransform {
+        switch phase {
+        case 1:
+            return .init(x: -2, y: 2, zRotation: -1, x3D: 1, y3D: -2, scale: 0.988, opacity: 1)
+        case 2:
+            return .init(x: -6, y: -1, zRotation: -2, x3D: 2, y3D: -4, scale: 0.99, opacity: 1)
+        case 3:
+            return .init(x: -42, y: -10, zRotation: -4, x3D: 5, y3D: -9, scale: 0.985, opacity: 1)
+        case 4:
+            return .init(x: -146, y: 24, zRotation: -14, x3D: 11, y3D: -22, scale: 0.955, opacity: 0.96)
+        case 5:
+            return .init(x: -156, y: 28, zRotation: -16, x3D: 13, y3D: -24, scale: 0.92, opacity: 0.0)
+        default:
+            return .init(x: 0, y: 0, zRotation: 0, x3D: 0, y3D: 0, scale: 1, opacity: 1)
+        }
+    }
+
+    /// フェーズごとの右片の動きです。
+    private func rightTransform(phase: Int) -> TicketPieceTransform {
+        switch phase {
+        case 1:
+            return .init(x: 2, y: 2, zRotation: 1, x3D: -1, y3D: 2, scale: 0.988, opacity: 1)
+        case 2:
+            return .init(x: 6, y: -1, zRotation: 2, x3D: -2, y3D: 4, scale: 0.99, opacity: 1)
+        case 3:
+            return .init(x: 42, y: -10, zRotation: 4, x3D: -5, y3D: 9, scale: 0.985, opacity: 1)
+        case 4:
+            return .init(x: 146, y: 24, zRotation: 14, x3D: -11, y3D: 22, scale: 0.955, opacity: 0.96)
+        case 5:
+            return .init(x: 156, y: 28, zRotation: 16, x3D: -13, y3D: 24, scale: 0.92, opacity: 0.0)
+        default:
+            return .init(x: 0, y: 0, zRotation: 0, x3D: 0, y3D: 0, scale: 1, opacity: 1)
+        }
+    }
+}
+
+/// チケット片の位置・角度・透明度をまとめるための構造体です。
+struct TicketPieceTransform {
+    let x: CGFloat
+    let y: CGFloat
+    let zRotation: CGFloat
+    let x3D: CGFloat
+    let y3D: CGFloat
+    let scale: CGFloat
+    let opacity: CGFloat
+}
+
+/// 破れた瞬間に紙くずの粒が散る演出です。
+struct TicketPaperParticleView: View {
+    let isActive: Bool
+    let splitX: CGFloat
+
+    var body: some View {
+        GeometryReader { proxy in
+            ZStack {
+                ForEach(0..<18, id: \.self) { index in
+                    Circle()
+                        .fill(Color.white.opacity(0.9))
+                        .frame(width: 2 + CGFloat(index % 3), height: 2 + CGFloat(index % 3))
+                        .offset(
+                            x: isActive ? particleX(index) : 0,
+                            y: isActive ? particleY(index) : 0
+                        )
+                        .opacity(isActive ? 0.0 : 0.95)
+                        .scaleEffect(isActive ? 0.5 : 1.0)
+                        .position(x: splitX, y: proxy.size.height * 0.52)
+                        .animation(
+                            .easeOut(duration: 0.55).delay(Double(index) * 0.008),
+                            value: isActive
+                        )
+                }
+            }
+        }
+        .allowsHitTesting(false)
+    }
+
+    private func particleX(_ i: Int) -> CGFloat {
+        let sign: CGFloat = i % 2 == 0 ? -1 : 1
+        return sign * (12 + CGFloat((i * 7) % 24))
+    }
+
+    private func particleY(_ i: Int) -> CGFloat {
+        CGFloat(-18 + (i % 9) * 4)
+    }
+}
+
 /// チケットタップ後に表示する展示プレビュー画面です。
 struct ExhibitionPreviewView: View {
     let ticket: ExhibitionTicket
+    let startWithWhiteReveal: Bool
     let onExitToHome: () -> Void
+    @State private var detailRevealOpacity: CGFloat = 1
 
     var body: some View {
         ZStack {
@@ -247,6 +736,41 @@ struct ExhibitionPreviewView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, 28)
                 .padding(.bottom, 54)
+            }
+            
+            if detailRevealOpacity > 0.001 {
+                Color.white
+                    .ignoresSafeArea()
+                    .opacity(detailRevealOpacity)
+                    .allowsHitTesting(false)
+            }
+        }
+        .overlay(alignment: .topLeading) {
+            Button {
+                onExitToHome()
+            } label: {
+                Image(systemName: "chevron.left")
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(.white)
+                    .frame(width: 50, height: 50)
+                    .background(Color.black.opacity(0.35))
+                    .clipShape(Circle())
+                    .overlay(
+                        Circle()
+                            .stroke(Color.white.opacity(0.2), lineWidth: 1)
+                    )
+            }
+            .padding(.leading, 20)
+            .padding(.top, 70)
+        }
+        .onAppear {
+            if startWithWhiteReveal {
+                detailRevealOpacity = 1
+                withAnimation(.easeOut(duration: 1.0)) {
+                    detailRevealOpacity = 0
+                }
+            } else {
+                detailRevealOpacity = 0
             }
         }
         .toolbar {
